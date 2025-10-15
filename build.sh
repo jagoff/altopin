@@ -18,7 +18,7 @@ swiftc -O \
     -framework Cocoa \
     -framework Foundation \
     -framework UserNotifications \
-    AlwaysOnTop/main.swift \
+    main.swift \
     -o build/AlwaysOnTop.app/Contents/MacOS/AlwaysOnTop
 
 # Copiar Info.plist

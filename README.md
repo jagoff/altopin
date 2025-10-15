@@ -88,12 +88,13 @@ AltoPin utiliza varias técnicas para mantener las ventanas siempre visibles:
 ## 📁 Estructura del Proyecto
 
 ```
-AlwaysOnTop/
-├── AlwaysOnTop/
-│   └── main.swift          # Código principal de la aplicación
+altopin/
+├── main.swift              # Código principal de la aplicación (412 líneas)
 ├── Info.plist              # Configuración de la app
 ├── build.sh                # Script de compilación
 ├── README.md               # Este archivo
+├── LICENSE                 # Licencia MIT
+├── CHANGELOG.md            # Historial de cambios
 └── .gitignore             # Archivos ignorados por git
 ```
 

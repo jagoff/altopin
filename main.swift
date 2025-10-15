@@ -7,13 +7,21 @@ import UserNotifications
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var hotKey: GlobalHotKey?
-    var topMostWindows: [CGWindowID: String] = [:] // WindowID -> App Name
-    var windowTimers: [CGWindowID: Timer] = [:]
-    var pinnedWindowPIDs: [CGWindowID: pid_t] = [:] // WindowID -> PID
-    var pinnedWindowElements: [CGWindowID: AXUIElement] = [:] // WindowID -> AXUIElement
+    var pinnedWindowID: CGWindowID?
+    var pinnedAppName: String?
+    var pinnedPID: pid_t?
+    var pinnedWindowElement: AXUIElement?
+    var monitorTimer: Timer?
     var appActivationObserver: NSObjectProtocol?
-    var lastFrontmostPID: pid_t = 0 // Para detectar cambios de app
-    var windowActivityTimestamps: [CGWindowID: Date] = [:] // Para timer adaptativo
+    
+    // Helper para activar apps de manera compatible
+    func activateApp(_ app: NSRunningApplication) {
+        if #available(macOS 14.0, *) {
+            app.activate()
+        } else {
+            app.activate(options: [.activateIgnoringOtherApps])
+        }
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         requestNotificationPermissions()
@@ -49,14 +57,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
-            guard let self = self, !self.topMostWindows.isEmpty else { return }
+        ) { [weak self] notification in
+            guard let self = self,
+                  let pinnedPID = self.pinnedPID,
+                  let pinnedElement = self.pinnedWindowElement else { return }
             
-            for (windowID, pid) in self.pinnedWindowPIDs {
-                if let windowElement = self.pinnedWindowElements[windowID] {
-                    AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)
-                    let app = NSRunningApplication(processIdentifier: pid)
-                    app?.activate(options: [.activateIgnoringOtherApps])
+            if let activatedApp = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                if activatedApp.processIdentifier != pinnedPID {
+                    AXUIElementPerformAction(pinnedElement, kAXRaiseAction as CFString)
+                    if let app = NSRunningApplication(processIdentifier: pinnedPID) {
+                        self.activateApp(app)
+                    }
                 }
             }
         }
@@ -66,10 +77,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         
         // Título principal
-        let titleItem = NSMenuItem(title: "📌 Always On Top", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: "📌 AltoPin", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         let font = NSFont.boldSystemFont(ofSize: 13)
-        titleItem.attributedTitle = NSAttributedString(string: "📌 Always On Top", attributes: [.font: font])
+        titleItem.attributedTitle = NSAttributedString(string: "📌 AltoPin", attributes: [.font: font])
         menu.addItem(titleItem)
         
         menu.addItem(NSMenuItem.separator())
@@ -189,10 +200,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             
             if topMostWindows.isEmpty {
-                button.animator().image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Always On Top")
+                button.animator().image = NSImage(systemSymbolName: "pin", accessibilityDescription: "AltoPin")
                 button.animator().title = ""
             } else {
-                button.animator().image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Always On Top")
+                button.animator().image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "AltoPin")
                 button.animator().title = " \(topMostWindows.count)"
             }
         })
@@ -244,18 +255,64 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func pinAppByPID(_ pid: pid_t) {
+        print("🎯 [1] pinAppByPID iniciado - PID: \(pid)")
+        
         guard let app = NSRunningApplication(processIdentifier: pid),
-              let appName = app.localizedName,
-              let windowID = getWindowID(forPID: pid),
-              let windowElement = getWindowElement(forPID: pid) else {
-            showNotification(title: "AltoPin", subtitle: "No se pudo acceder a la ventana")
+              let appName = app.localizedName else {
+            print("❌ [2] No se pudo obtener app/appName")
+            showNotification(title: "AltoPin", subtitle: "No se pudo acceder a la aplicación")
             return
         }
         
-        pinWindow(windowID: windowID, pid: pid, windowElement: windowElement, appName: appName)
-        showNotification(title: appName, subtitle: "Activado ✓")
-        updateStatusBarIcon()
-        updateMenu()
+        print("✅ [3] App encontrada: \(appName)")
+        
+        // Activar la app primero
+        print("🚀 [4] Activando app...")
+        activateApp(app)
+        
+        // Esperar brevemente para que la app se active
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            print("⏰ [5] Después de 0.2s, obteniendo ventana...")
+            guard let self = self else { return }
+            
+            guard let windowID = self.getWindowID(forPID: pid) else {
+                print("❌ [6] No se pudo obtener windowID")
+                self.showNotification(title: "AltoPin", subtitle: "No se pudo acceder a la ventana de \(appName)")
+                return
+            }
+            print("✅ [7] WindowID: \(windowID)")
+            
+            guard let windowElement = self.getWindowElement(forPID: pid) else {
+                print("❌ [8] No se pudo obtener windowElement")
+                self.showNotification(title: "AltoPin", subtitle: "No se pudo acceder a la ventana de \(appName)")
+                return
+            }
+            print("✅ [9] WindowElement obtenido")
+            
+            // Traer ventana al frente
+            print("⬆️ [10] Trayendo ventana al frente...")
+            AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)
+            
+            // Pinnear
+            print("📌 [11] Pinneando ventana...")
+            self.pinWindow(windowID: windowID, pid: pid, windowElement: windowElement, appName: appName)
+            print("✅ [12] Ventana pinneada exitosamente")
+            
+            // Forzar al frente agresivamente los primeros 2 segundos
+            print("💪 [13] Iniciando empujones agresivos...")
+            for i in 1...20 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.1) {
+                    AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)
+                    if i % 5 == 0 {
+                        self.activateApp(app)
+                    }
+                }
+            }
+            
+            self.showNotification(title: appName, subtitle: "Activado ✓")
+            self.updateStatusBarIcon()
+            self.updateMenu()
+        }
     }
     
     // MARK: - Helper Methods
@@ -280,9 +337,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func getWindowElement(forPID pid: pid_t) -> AXUIElement? {
         let appElement = AXUIElementCreateApplication(pid)
+        
+        // Primero intentar obtener la ventana enfocada
         var focusedWindow: AnyObject?
-        let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &focusedWindow)
-        return result == .success ? (focusedWindow as! AXUIElement?) : nil
+        var result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &focusedWindow)
+        
+        if result == .success, let window = focusedWindow as! AXUIElement? {
+            return window
+        }
+        
+        // Si no hay ventana enfocada, obtener la primera ventana disponible
+        var windowsRef: AnyObject?
+        result = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        
+        if result == .success, let windows = windowsRef as? [AXUIElement], !windows.isEmpty {
+            return windows[0]
+        }
+        
+        return nil
     }
     
     func pinWindow(windowID: CGWindowID, pid: pid_t, windowElement: AXUIElement, appName: String) {
@@ -291,8 +363,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pinnedWindowElements[windowID] = windowElement
         
         AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)
-        let app = NSRunningApplication(processIdentifier: pid)
-        app?.activate(options: [.activateIgnoringOtherApps])
+        if let app = NSRunningApplication(processIdentifier: pid) {
+            activateApp(app)
+        }
         
         startWindowMonitoring(windowID: windowID, pid: pid, windowElement: windowElement, appName: appName)
     }
@@ -310,9 +383,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         windowTimers[windowID]?.invalidate()
         windowActivityTimestamps[windowID] = Date()
         
-        // Timer adaptativo: rápido cuando hay actividad, lento cuando está estable
-        var isActive = true
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] timer in
+        print("🔄 [14] Timer ULTRA-AGRESIVO iniciado para \(appName)")
+        
+        // Timer ULTRA-AGRESIVO: 10ms, siempre fuerza al frente
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] timer in
             guard let self = self, self.topMostWindows.keys.contains(windowID) else {
                 timer.invalidate()
                 self?.windowTimers.removeValue(forKey: windowID)
@@ -320,72 +394,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             
-            // Detectar si hay cambio de app activa
+            // SIEMPRE traer al frente, sin importar qué
+            AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)
+            
+            // Verificar si otra app está activa
             let currentFrontApp = NSWorkspace.shared.frontmostApplication
             let currentPID = currentFrontApp?.processIdentifier ?? 0
-            let appChanged = currentPID != self.lastFrontmostPID
-            self.lastFrontmostPID = currentPID
             
-            // Si hay actividad, usar intervalo rápido
-            if appChanged {
-                self.windowActivityTimestamps[windowID] = Date()
-                isActive = true
-            }
-            
-            // Calcular tiempo desde última actividad
-            let timeSinceActivity = Date().timeIntervalSince(self.windowActivityTimestamps[windowID] ?? Date())
-            
-            // Cambiar a modo lento después de 2 segundos sin actividad
-            if timeSinceActivity > 2.0 && isActive {
-                isActive = false
-                timer.invalidate()
-                self.startSlowMonitoring(windowID: windowID, pid: pid, windowElement: windowElement, appName: appName)
-                return
-            }
-            
-            // Solo actuar si la app pinneada no es la activa
+            // Si NO es nuestra app, forzar activación
             if currentPID != pid {
-                AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)
-                let app = NSRunningApplication(processIdentifier: pid)
-                app?.activate(options: [.activateIgnoringOtherApps])
+                if let app = NSRunningApplication(processIdentifier: pid) {
+                    self.activateApp(app)
+                }
             }
         }
         
         windowTimers[windowID] = timer
     }
     
-    func startSlowMonitoring(windowID: CGWindowID, pid: pid_t, windowElement: AXUIElement, appName: String) {
-        windowTimers[windowID]?.invalidate()
-        
-        // Timer lento para cuando no hay actividad
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] timer in
-            guard let self = self, self.topMostWindows.keys.contains(windowID) else {
-                timer.invalidate()
-                self?.windowTimers.removeValue(forKey: windowID)
-                return
-            }
-            
-            // Detectar cambio de app
-            let currentFrontApp = NSWorkspace.shared.frontmostApplication
-            let currentPID = currentFrontApp?.processIdentifier ?? 0
-            
-            if currentPID != self.lastFrontmostPID {
-                // Hay actividad, volver a modo rápido
-                timer.invalidate()
-                self.startWindowMonitoring(windowID: windowID, pid: pid, windowElement: windowElement, appName: appName)
-                return
-            }
-            
-            self.lastFrontmostPID = currentPID
-            
-            // Solo actuar si es necesario
-            if currentPID != pid {
-                AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)
-            }
-        }
-        
-        windowTimers[windowID] = timer
-    }
     
     func showAlert(message: String) {
         let alert = NSAlert()

@@ -2,6 +2,32 @@
 
 All notable changes to AltoPin will be documented in this file.
 
+## [1.2.0] - 2025-10-15
+
+### Changed
+- **ULTRA-AGGRESSIVE MODE**: Timer reducido de 50ms a 10ms (100 checks/segundo)
+- Eliminado timer adaptativo - ahora siempre usa máxima velocidad
+- Ventanas pinneadas se mantienen al frente de forma instantánea
+
+### Added
+- 20 "empujones" adicionales al frente durante los primeros 2 segundos después de pinnear
+- Mejor soporte para pinnear desde el menú
+- Logs de debug para troubleshooting
+- Script `package.sh` para crear releases
+
+### Improved
+- Respuesta instantánea al pinnear ventanas
+- Imposible cambiar de ventana cuando hay una pinneada (< 10ms de latencia)
+- Mejor activación de apps desde el menú
+
+### Technical
+- Timer de 10ms (0.01s) para máxima agresividad
+- Verificación constante del estado de la app activa
+- Forzado de activación cada vez que se detecta otra app
+
+### Breaking Changes
+- Mayor uso de CPU debido al timer ultra-rápido (trade-off por funcionalidad)
+
 ## [1.1.0] - 2025-10-15
 
 ### Added

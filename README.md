@@ -6,6 +6,14 @@
 ![Swift](https://img.shields.io/badge/Swift-5.0+-orange.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
+## ⚡️ Inicio Rápido
+
+```bash
+git clone https://github.com/tu-usuario/altopin.git && cd altopin && bash build.sh && open build/AlwaysOnTop.app
+```
+
+Presiona **Control+Cmd+T** en cualquier ventana para pinnearla. ¡Así de simple!
+
 ## ✨ Características
 
 - 🎯 **Pin instantáneo**: Mantén cualquier ventana siempre visible con Control+Cmd+T
@@ -23,28 +31,34 @@
 
 ## 🚀 Instalación
 
-### Desde el código fuente
+### Opción 1: Instalación Rápida (Recomendada)
 
-1. **Clona el repositorio**:
 ```bash
+# 1. Clona el repositorio
 git clone https://github.com/tu-usuario/altopin.git
 cd altopin
-```
 
-2. **Compila la aplicación**:
-```bash
+# 2. Compila e instala
 bash build.sh
-```
-
-3. **Instala en Applications** (opcional):
-```bash
 cp -r build/AlwaysOnTop.app /Applications/
+
+# 3. Abre la aplicación
+open /Applications/AlwaysOnTop.app
 ```
 
-4. **Ejecuta la aplicación**:
+### Opción 2: Solo Probar (Sin Instalar)
+
 ```bash
+# 1. Clona y compila
+git clone https://github.com/tu-usuario/altopin.git
+cd altopin
+bash build.sh
+
+# 2. Ejecuta directamente
 open build/AlwaysOnTop.app
 ```
+
+**Nota**: La primera vez que ejecutes la app, macOS te pedirá permisos de accesibilidad.
 
 ## 🔐 Permisos de Accesibilidad
 

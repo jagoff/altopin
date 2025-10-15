@@ -12,6 +12,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var pinnedWindowPIDs: [CGWindowID: pid_t] = [:] // WindowID -> PID
     var pinnedWindowElements: [CGWindowID: AXUIElement] = [:] // WindowID -> AXUIElement
     var appActivationObserver: NSObjectProtocol?
+    var lastFrontmostPID: pid_t = 0 // Para detectar cambios de app
+    var windowActivityTimestamps: [CGWindowID: Date] = [:] // Para timer adaptativo
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         requestNotificationPermissions()
@@ -181,13 +183,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func updateStatusBarIcon() {
         guard let button = statusItem?.button else { return }
         
-        if topMostWindows.isEmpty {
-            button.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Always On Top")
-            button.title = ""
-        } else {
-            button.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Always On Top")
-            button.title = " \(topMostWindows.count)"
-        }
+        // Animación suave al cambiar
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            
+            if topMostWindows.isEmpty {
+                button.animator().image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Always On Top")
+                button.animator().title = ""
+            } else {
+                button.animator().image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Always On Top")
+                button.animator().title = " \(topMostWindows.count)"
+            }
+        })
     }
     
     func setupGlobalHotKey() {
@@ -295,24 +303,84 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         windowTimers.removeValue(forKey: windowID)
         pinnedWindowPIDs.removeValue(forKey: windowID)
         pinnedWindowElements.removeValue(forKey: windowID)
+        windowActivityTimestamps.removeValue(forKey: windowID)
     }
     
     func startWindowMonitoring(windowID: CGWindowID, pid: pid_t, windowElement: AXUIElement, appName: String) {
         windowTimers[windowID]?.invalidate()
+        windowActivityTimestamps[windowID] = Date()
         
+        // Timer adaptativo: rápido cuando hay actividad, lento cuando está estable
+        var isActive = true
         let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] timer in
+            guard let self = self, self.topMostWindows.keys.contains(windowID) else {
+                timer.invalidate()
+                self?.windowTimers.removeValue(forKey: windowID)
+                self?.windowActivityTimestamps.removeValue(forKey: windowID)
+                return
+            }
+            
+            // Detectar si hay cambio de app activa
+            let currentFrontApp = NSWorkspace.shared.frontmostApplication
+            let currentPID = currentFrontApp?.processIdentifier ?? 0
+            let appChanged = currentPID != self.lastFrontmostPID
+            self.lastFrontmostPID = currentPID
+            
+            // Si hay actividad, usar intervalo rápido
+            if appChanged {
+                self.windowActivityTimestamps[windowID] = Date()
+                isActive = true
+            }
+            
+            // Calcular tiempo desde última actividad
+            let timeSinceActivity = Date().timeIntervalSince(self.windowActivityTimestamps[windowID] ?? Date())
+            
+            // Cambiar a modo lento después de 2 segundos sin actividad
+            if timeSinceActivity > 2.0 && isActive {
+                isActive = false
+                timer.invalidate()
+                self.startSlowMonitoring(windowID: windowID, pid: pid, windowElement: windowElement, appName: appName)
+                return
+            }
+            
+            // Solo actuar si la app pinneada no es la activa
+            if currentPID != pid {
+                AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)
+                let app = NSRunningApplication(processIdentifier: pid)
+                app?.activate(options: [.activateIgnoringOtherApps])
+            }
+        }
+        
+        windowTimers[windowID] = timer
+    }
+    
+    func startSlowMonitoring(windowID: CGWindowID, pid: pid_t, windowElement: AXUIElement, appName: String) {
+        windowTimers[windowID]?.invalidate()
+        
+        // Timer lento para cuando no hay actividad
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] timer in
             guard let self = self, self.topMostWindows.keys.contains(windowID) else {
                 timer.invalidate()
                 self?.windowTimers.removeValue(forKey: windowID)
                 return
             }
             
-            AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)
+            // Detectar cambio de app
+            let currentFrontApp = NSWorkspace.shared.frontmostApplication
+            let currentPID = currentFrontApp?.processIdentifier ?? 0
             
-            if let frontApp = NSWorkspace.shared.frontmostApplication,
-               frontApp.processIdentifier != pid {
-                let app = NSRunningApplication(processIdentifier: pid)
-                app?.activate(options: [.activateIgnoringOtherApps])
+            if currentPID != self.lastFrontmostPID {
+                // Hay actividad, volver a modo rápido
+                timer.invalidate()
+                self.startWindowMonitoring(windowID: windowID, pid: pid, windowElement: windowElement, appName: appName)
+                return
+            }
+            
+            self.lastFrontmostPID = currentPID
+            
+            // Solo actuar si es necesario
+            if currentPID != pid {
+                AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)
             }
         }
         

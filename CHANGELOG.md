@@ -2,6 +2,25 @@
 
 All notable changes to AltoPin will be documented in this file.
 
+## [1.1.0] - 2025-10-15
+
+### Added
+- **Timer adaptativo**: Cambia automáticamente entre 50ms (activo) y 200ms (estable) para optimizar CPU y batería
+- **Animaciones suaves**: Transiciones fade in/out en el ícono del menu bar
+- **Cache de AXUIElement**: Mejor performance al reutilizar elementos de accesibilidad
+- **Detección de actividad**: Monitorea cambios de app para ajustar el timer dinámicamente
+- **Homebrew Cask**: Fórmula para instalación via `brew install --cask altopin`
+
+### Improved
+- Reducción del 75% en uso de CPU cuando las ventanas están estables
+- Mejor respuesta al cambiar entre apps
+- Animaciones más profesionales en la UI
+
+### Technical
+- Nuevo sistema de timestamps para tracking de actividad
+- Timer de dos velocidades (fast/slow) según contexto
+- Optimización de llamadas a Accessibility API
+
 ## [1.0.0] - 2025-10-15
 
 ### Added
